@@ -1,0 +1,6 @@
+.cache/
+build/
+dist/
+.freebuff/
+.cloud-attachments/
+*.log

@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "id": "msa2ssid-accounts",
+  "version": "1.0.0",
+  "name": "Account Manager",
+  "description": "Microsoft sign-in based account switcher: per-account device-code sign-in, skin heads, session token export and official name changes.",
+  "authors": ["msa2ssid"],
+  "license": "MIT",
+  "environment": "client",
+  "entrypoints": {
+    "client": [
+      "dev.msa2ssid.mod.AccountManagerMod"
+    ]
+  },
+  "depends": {
+    "fabricloader": ">=0.19.3",
+    "minecraft": "~__MC__",
+    "java": ">=25",
+    "fabric-api": "*"
+  }
+}
