@@ -9,6 +9,23 @@ A Minecraft account manager for Fabric 26.x, plus a command-line MSA → SSID co
 - **CLI** — turn an MSA token, refresh token or SSID into a working Minecraft session from
   a terminal.
 
+## Is this safe?
+
+Fair question — the mod handles account tokens, so don't take a jar on trust:
+
+- Every line of it is in this repository. Nothing is obfuscated, and the mod jar is plain
+  `javac` output with no libraries bundled inside.
+- It talks to Microsoft, Xbox Live and Mojang services and nothing else: `login.live.com`,
+  `login.microsoftonline.com`, `user.auth.xboxlive.com`, `xsts.auth.xboxlive.com`,
+  `api.minecraftservices.com`, `sessionserver.mojang.com`, plus Mojang's skin texture host.
+  Searching the source for `https://` lists every endpoint.
+- Tokens are written to `config/msa2ssid.json` with owner-only permissions (`0600`), and are
+  never sent anywhere except those services.
+- `./build-mod.sh 26.3` rebuilds the release jar from source, and the CLI is a single 21 KB
+  jar of readable classes — decompile it, or run it with `--help` without a game installed.
+
+If a jar you got from somewhere else behaves differently, don't run it.
+
 ## Build
 
 Java 25 and Python 3 (the build fetches the client jars it compiles against) are required.
