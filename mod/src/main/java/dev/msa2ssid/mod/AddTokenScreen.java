@@ -3,6 +3,7 @@ package dev.msa2ssid.mod;
 import dev.msa2ssid.core.Account;
 import dev.msa2ssid.core.Auth;
 import dev.msa2ssid.core.Store;
+import dev.msa2ssid.core.Throttle;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import net.minecraft.client.Minecraft;
@@ -107,8 +108,10 @@ public final class AddTokenScreen extends Screen {
     }
 
     /**
-     * Adds every line as an account, one at a time. A line that fails is counted and
-     * reported, but never stops the rest; the summary names the first failure.
+     * Adds every line as an account, one at a time. Lines are paced and a 429 is
+     * retried with backoff; a line that is still rate limited stops the import so the
+     * rest can be pasted again once the limit clears. Other failures are counted and
+     * reported, but never stop the rest.
      */
     private void submit(List<Auth.TokenLine> lines) {
         if (busy) return;
@@ -129,14 +132,18 @@ public final class AddTokenScreen extends Screen {
             String clientId = store.clientId();
             int added = 0;
             String firstFailure = null;
+            String stopped = null;
             String focus = null;
 
             for (int i = 0; i < lines.size(); i++) {
                 Auth.TokenLine line = lines.get(i);
                 String who = line.label() == null ? "line " + (i + 1) : line.label();
-                status = "Adding " + (i + 1) + " of " + lines.size() + ": " + who;
+                String progress = "Adding " + (i + 1) + " of " + lines.size() + ": ";
+                status = progress + who;
                 try {
-                    Auth.TokenLogin login = Auth.loginWithToken(clientId, line.token());
+                    if (i > 0) Throttle.gap();
+                    Auth.TokenLogin login = Throttle.login(clientId, line.token(),
+                            note -> status = progress + note);
                     Account account = Account.fromSession(login.session(), login.msRefreshToken());
                     store.put(account);
                     Heads.invalidate(account.uuid());
@@ -144,11 +151,15 @@ public final class AddTokenScreen extends Screen {
                     focus = account.uuid();
                     added++;
                 } catch (Exception e) {
+                    if (Throttle.rateLimited(e)) {
+                        stopped = who;
+                        break;
+                    }
                     if (firstFailure == null) firstFailure = who + ": " + AccountScreen.message(e);
                 }
             }
 
-            String note = save(store, added, lines.size(), firstFailure);
+            String note = save(store, added, lines.size(), firstFailure, stopped);
             busy = false;
 
             Minecraft mc = Minecraft.getInstance();
@@ -157,13 +168,17 @@ public final class AddTokenScreen extends Screen {
         });
     }
 
-    private static String save(Store store, int added, int total, String firstFailure) {
+    private static String save(Store store, int added, int total, String firstFailure, String stopped) {
         try {
             store.save();
         } catch (Exception e) {
             return "Added " + added + " but could not save: " + AccountScreen.message(e);
         }
         String summary = "Added " + added + " of " + total;
+        if (stopped != null) {
+            return summary + " - rate limited at " + stopped
+                    + ", wait a minute and import the rest";
+        }
         return firstFailure == null ? summary : summary + " - first failure: " + firstFailure;
     }
 
@@ -206,7 +221,7 @@ public final class AddTokenScreen extends Screen {
         if (status.isEmpty()) {
             g.text(this.font, "only use tokens for accounts you own", px + PAD, py + 170, Ui.MUTED);
         } else {
-            int color = busy ? Ui.WARN
+            int color = busy || status.contains("rate limited") ? Ui.WARN
                     : status.startsWith("Added") || status.endsWith("saved") ? Ui.OK : Ui.DANGER;
             g.text(this.font, status, px + PAD, py + 170, color);
         }

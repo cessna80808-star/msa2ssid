@@ -30,7 +30,7 @@ final class SessionInject {
         if (uuid == null) return false;
         User user = Minecraft.getInstance().getUser();
         if (user == null || user.getProfileId() == null) return false;
-        return user.getProfileId().toString().replace("-", "").equalsIgnoreCase(uuid.replace("-", ""));
+        return Account.sameUuid(user.getProfileId().toString(), uuid);
     }
 
     /** Makes the account the client's session. Call on the render thread. */

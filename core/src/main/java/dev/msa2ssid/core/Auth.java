@@ -151,7 +151,7 @@ public final class Auth {
         try {
             return new Renewed(refreshLive(refreshToken, hasApp ? clientId : DEFAULT_CLIENT_ID), "t");
         } catch (Http.ApiException e) {
-            if (!hasApp) throw e;
+            if (!hasApp || Throttle.rateLimited(e)) throw e;
             return new Renewed(refreshMicrosoft(clientId, refreshToken), "d");
         }
     }
@@ -252,6 +252,7 @@ public final class Auth {
                         ? token : renewed.tokens().refreshToken();
                 return new TokenLogin(session, kept, "Microsoft refresh token");
             } catch (Exception e) {
+                if (Throttle.rateLimited(e)) throw e;
                 refreshFailure = e;
             }
         }
@@ -261,7 +262,8 @@ public final class Auth {
             return new TokenLogin(profile(token, ASSUMED_SESSION_SECONDS), null,
                     "Minecraft access token (SSID)");
         } catch (Http.ApiException e) {
-            if (e.status >= 500) throw e;
+            // A 429 must reach the import's retry, not be mistaken for a bad token.
+            if (e.status >= 500 || Throttle.rateLimited(e)) throw e;
         }
 
         String preferred = token.startsWith("M.") ? "t" : "d";
@@ -270,6 +272,7 @@ public final class Auth {
             try {
                 return new TokenLogin(chain(token, ticketType), null, "Microsoft access ticket");
             } catch (Exception e) {
+                if (Throttle.rateLimited(e)) throw e;
                 if (firstFailure == null) firstFailure = e;
             }
         }

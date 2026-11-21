@@ -1,6 +1,7 @@
 # msa2ssid
 
-A Minecraft account manager for Fabric 26.x, plus a command-line MSA → SSID converter.
+A Minecraft account manager for Fabric 1.21.11 and 26.x, plus a command-line MSA → SSID
+converter.
 
 - **Mod** — keep Microsoft accounts in one list: add them with a device-code sign-in, by
   pasting a refresh token or SSID, or by importing a whole `label:token` set from the
@@ -31,16 +32,22 @@ If a jar you got from somewhere else behaves differently, don't run it.
 Java 25 and Python 3 (the build fetches the client jars it compiles against) are required.
 
 ```bash
-./build-mod.sh 26.3     # one Minecraft version, or "./build-mod.sh" for 26.1.2, 26.2 and 26.3
+./build-mod.sh 26.3     # one Minecraft version, or "./build-mod.sh" for 1.21.11, 26.1.2, 26.2 and 26.3
 ./build.sh              # CLI -> dist/msa2ssid.jar
 ```
 
-There is no Gradle or Loom step: 26.x ships unobfuscated, so the mod is compiled straight
-against the client jar.
+There is no Gradle or Loom step. 26.x ships unobfuscated, so it is compiled straight
+against the client jar. 1.21.11 and older ship obfuscated, so those builds also fetch
+Mojang's official mappings and a remapper into `.cache/`, compile against the
+deobfuscated client and Fabric API, rename the handful of API names that only 26.x
+spells differently, and remap the finished classes to intermediary — the namespace
+Fabric Loader resolves mods in. The first build of a 1.21.x version takes a minute
+longer; later builds reuse the cache.
 
 ## Install
 
-1. Fabric Loader 0.19.3 or newer, plus Fabric API, for Minecraft 26.1.2, 26.2 or 26.3.
+1. Fabric Loader 0.19.3 or newer, plus Fabric API, for Minecraft 26.1.2, 26.2 or 26.3
+   (1.21.11 needs Loader 0.17.0 or newer).
 2. Drop `account-manager-<version>.jar` into `mods/`.
 3. Press **Right Shift** in game, or click **Accounts** on the title screen.
 

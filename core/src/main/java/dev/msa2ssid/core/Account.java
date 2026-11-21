@@ -88,6 +88,11 @@ public record Account(
                 Json.num(m.get("addedAt")));
     }
 
+    /** Compares two uuids in either the dashed or the 32-character form. */
+    public static boolean sameUuid(String a, String b) {
+        return a != null && b != null && a.replace("-", "").equalsIgnoreCase(b.replace("-", ""));
+    }
+
     /** Formats a 32-char hex id as a dashed UUID; other input passes through. */
     public static String formatUuid(String id) {
         if (id == null) return null;

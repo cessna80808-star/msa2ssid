@@ -49,8 +49,9 @@ public final class AccountScreen extends Screen {
     private int rowsTop;
     private int rowsArea;
 
+    /** Opens with any status left by a background removal (a Hypixel ban). */
     public AccountScreen() {
-        this(null);
+        this(null, AccountManagerMod.takeNote());
     }
 
     /** @param focusUuid account to re-select after returning from a sub-screen */

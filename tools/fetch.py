@@ -10,6 +10,8 @@ import sys
 import urllib.request
 import zipfile
 
+import remapper
+
 MANIFEST = "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json"
 LOADER_VERSION = "0.20.1"
 LOADER_URL = f"https://maven.fabricmc.net/net/fabricmc/fabric-loader/{LOADER_VERSION}/fabric-loader-{LOADER_VERSION}.jar"
@@ -18,14 +20,17 @@ UA = {"User-Agent": "msa2ssid-build/1.0"}
 
 
 def get(url, dest=None):
+    # Cached artifacts never change. Skipping the download keeps a rebuild offline
+    # and makes a flaky DNS lookup harmless instead of fatal.
+    if dest and os.path.exists(dest):
+        return dest
     req = urllib.request.Request(url, headers=UA)
     with urllib.request.urlopen(req, timeout=120) as r:
         data = r.read()
     if dest:
         os.makedirs(os.path.dirname(dest), exist_ok=True)
-        if not os.path.exists(dest):
-            with open(dest, "wb") as f:
-                f.write(data)
+        with open(dest, "wb") as f:
+            f.write(data)
         return dest
     return data
 
@@ -40,12 +45,23 @@ def main():
     os.makedirs(out, exist_ok=True)
     cp = []
 
-    manifest = fetch_json(MANIFEST)
-    entry = next(v for v in manifest["versions"] if v["id"] == version)
-    meta = fetch_json(entry["url"])
+    meta_cache = os.path.join(out, "version-meta.json")
+    if os.path.exists(meta_cache):
+        with open(meta_cache, encoding="utf-8") as f:
+            meta = json.load(f)
+    else:
+        manifest = fetch_json(MANIFEST)
+        entry = next(v for v in manifest["versions"] if v["id"] == version)
+        meta = fetch_json(entry["url"])
+        with open(meta_cache, "w", encoding="utf-8") as f:
+            json.dump(meta, f)
 
     client_url = meta["downloads"]["client"]["url"]
-    cp.append(get(client_url, os.path.join(out, "client.jar")))
+    client = get(client_url, os.path.join(out, "client.jar"))
+    # 26.x ships unobfuscated; 1.21.x and older need Mojang's names before compiling.
+    obfuscated = remapper.is_obfuscated(client)
+    cp.append(remapper.deobfuscate_client(version, out, meta, sys.argv[2])
+              if obfuscated else client)
 
     libs = os.path.join(out, "libs")
     for lib in meta.get("libraries", []):
@@ -76,7 +92,12 @@ def main():
                 if name.startswith("META-INF/jars/") and name.endswith(".jar"):
                     with open(os.path.join(modules, os.path.basename(name)), "wb") as f:
                         f.write(zf.read(name))
-    cp.extend(os.path.join(modules, n) for n in sorted(os.listdir(modules)) if n.endswith(".jar"))
+    if obfuscated:
+        # The published modules are intermediary; remap them to the names we compile against.
+        cp.append(remapper.deobfuscate_fabric_api(version, out, meta, sys.argv[2]))
+    else:
+        cp.extend(os.path.join(modules, n) for n in sorted(os.listdir(modules))
+                  if n.endswith(".jar"))
 
     print(os.pathsep.join(cp))
 

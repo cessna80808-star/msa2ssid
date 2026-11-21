@@ -4,3 +4,4 @@ dist/
 .freebuff/
 .cloud-attachments/
 *.log
+__pycache__/

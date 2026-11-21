@@ -28,11 +28,18 @@ public final class Http {
     public static final class ApiException extends Exception {
         public final int status;
         public final String body;
+        /** The server's Retry-After wait in seconds, or 0 when it asked for none. */
+        public final long retryAfterSeconds;
 
         public ApiException(String message, int status, String body) {
+            this(message, status, body, 0);
+        }
+
+        public ApiException(String message, int status, String body, long retryAfterSeconds) {
             super(message);
             this.status = status;
             this.body = body;
+            this.retryAfterSeconds = Math.max(0, retryAfterSeconds);
         }
     }
 
@@ -65,7 +72,8 @@ public final class Http {
         HttpResponse<String> r = CLIENT.send(b.build(),
                 HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
         if (r.statusCode() / 100 != 2) {
-            throw new ApiException(describe(url, r.statusCode(), r.body()), r.statusCode(), r.body());
+            throw new ApiException(describe(url, r.statusCode(), r.body()), r.statusCode(), r.body(),
+                    retryAfter(r));
         }
         return r.body();
     }
@@ -82,7 +90,8 @@ public final class Http {
             HttpResponse<String> r = CLIENT.send(b.build(),
                     HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
             if (r.statusCode() / 100 != 2) {
-                throw new ApiException(describe(url, r.statusCode(), r.body()), r.statusCode(), r.body());
+                throw new ApiException(describe(url, r.statusCode(), r.body()), r.statusCode(), r.body(),
+                        retryAfter(r));
             }
             return r.body();
         } catch (IOException e) {
@@ -136,6 +145,16 @@ public final class Http {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new IOException("interrupted while fetching " + url, e);
+        }
+    }
+
+    /** The Retry-After header in whole seconds; the HTTP-date form is ignored. */
+    private static long retryAfter(HttpResponse<?> response) {
+        String value = response.headers().firstValue("Retry-After").orElse("");
+        try {
+            return Long.parseLong(value.trim());
+        } catch (NumberFormatException e) {
+            return 0;
         }
     }
 

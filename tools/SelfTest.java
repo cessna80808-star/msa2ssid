@@ -1,8 +1,10 @@
 import dev.msa2ssid.core.Account;
 import dev.msa2ssid.core.Auth;
+import dev.msa2ssid.core.Bans;
 import dev.msa2ssid.core.Http;
 import dev.msa2ssid.core.Skins;
 import dev.msa2ssid.core.Store;
+import dev.msa2ssid.core.Throttle;
 import java.awt.image.BufferedImage;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -26,6 +28,7 @@ public final class SelfTest {
         tokenParsing();
         deadTokenIsRejected();
         tokenListParsing();
+        banAndRateLimit();
         sessionToAccount();
         deviceCodeReachable();
         System.out.println(failures == 0 ? "ALL CHECKS PASSED" : failures + " CHECK(S) FAILED");
@@ -143,6 +146,32 @@ public final class SelfTest {
         check("no label on a bare token line",
                 dev.msa2ssid.core.Auth.parseTokenList("M.C000_EXAMPLE.0.U.Example." + "a".repeat(40))
                         .get(0).label() == null, "");
+    }
+
+    /** Hypixel ban detection and the import rate-limit policy. */
+    private static void banAndRateLimit() {
+        check("hypixel host recognized", Bans.isHypixel("mc.hypixel.net"), "");
+        check("hypixel host with a port recognized", Bans.isHypixel("hypixel.net:25565"), "");
+        check("other host is not hypixel", !Bans.isHypixel("play.example.net"), "");
+        check("lookalike host is not hypixel", !Bans.isHypixel("not-hypixel.net"), "");
+        check("permanent ban recognized", Bans.looksBanned(
+                "You are permanently banned from this server! Reason: Cheating\n"
+                        + "Find out more here: https://hypixel.net/appeal"), "");
+        check("temporary ban recognized",
+                Bans.looksBanned("You are temporarily banned for 29d 23h 59m from this server!"), "");
+        check("security block recognized",
+                Bans.looksBanned("Your account is currently blocked from joining this server."), "");
+        check("plain kick is not a ban", !Bans.looksBanned("You were kicked from this server!"), "");
+        check("missing reason is not a ban", !Bans.looksBanned(null), "");
+
+        check("backoff grows", Throttle.waitMillis(0, 0) == 5000 && Throttle.waitMillis(1, 0) == 10000
+                && Throttle.waitMillis(2, 0) == 20000, "");
+        check("backoff honours Retry-After", Throttle.waitMillis(0, 7) == 7000, "");
+        check("backoff is capped", Throttle.waitMillis(0, 9999) == 60000, "");
+        check("429 is a rate limit", Throttle.rateLimited(new Http.ApiException("too many", 429, "{}")), "");
+        check("401 is not a rate limit", !Throttle.rateLimited(new Http.ApiException("no", 401, "{}")), "");
+        check("Retry-After survives the exception",
+                Throttle.retryAfter(new Http.ApiException("slow down", 429, "{}", 7)) == 7, "");
     }
 
     private static void sessionToAccount() {
