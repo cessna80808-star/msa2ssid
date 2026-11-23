@@ -151,7 +151,9 @@ public final class Http {
             HttpRequest.Builder b = HttpRequest.newBuilder(URI.create(url))
                     .timeout(TIMEOUT)
                     .header("User-Agent", UA);
-            if (headers != null) headers.forEach(b::header);
+            // setHeader, not header: a caller's own User-Agent must replace this one
+            // instead of being sent beside it (two values make the header invalid).
+            if (headers != null) headers.forEach(b::setHeader);
             HttpResponse<String> r = NO_REDIRECT.send(b.GET().build(),
                     HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
             return new Redirect(r.statusCode(), r.headers().firstValue("Location").orElse(""));
