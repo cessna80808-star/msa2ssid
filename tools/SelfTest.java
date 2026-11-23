@@ -170,6 +170,54 @@ public final class SelfTest {
         check("a token is not a cookie", !Auth.looksLikeCookie("M.C5AAAA.T.BBBB"), "");
         check("a cookie is detected", Auth.looksLikeCookie("__Host-MSAAUTHP=1.AAAA"), "");
 
+        // A real cookies.txt export: tab separated, HttpOnly rows, other hosts included.
+        String export = "# Netscape HTTP Cookie File\n"
+                + ".live.com\tTRUE\t/\tTRUE\t0\tANON\tA=1&E=2&W=1\n"
+                + ".live.com\tTRUE\t/\tTRUE\t0\tMSPAuth\tDisabled\n"
+                + ".login.live.com\tTRUE\t/\tTRUE\t0\tMSPOAuthVis\t\n"
+                + "#HttpOnly_login.live.com\tFALSE\t/\tTRUE\t0\t__Host-MSAAUTH\t11-M.C541_FAKE\n"
+                + ".xboxlive.com\tTRUE\t/\tTRUE\t0\t_abck\tanalytics\n";
+        check("an exported cookies.txt is detected", Auth.looksLikeCookie(export), "");
+
+        String fromExport = Auth.cookieHeader(export);
+        check("export keeps the live.com cookies",
+                fromExport.contains("__Host-MSAAUTH=11-M.C541_FAKE") && fromExport.contains("MSPAuth=Disabled"),
+                fromExport);
+        check("export drops other hosts", !fromExport.contains("_abck"), fromExport);
+        check("export drops empty values", !fromExport.contains("MSPOAuthVis"), fromExport);
+        check("the sign-in cookie comes first", fromExport.startsWith("MSPAuth=Disabled"), fromExport);
+
+        // The mod's input box is one line: a paste that arrives with spaces instead of tabs
+        // must still be read as the same export.
+        String collapsed = export.replace("\t", " ");
+        check("an export with spaces instead of tabs is still a cookie", Auth.looksLikeCookie(collapsed), "");
+        String fromCollapsed = Auth.cookieHeader(collapsed);
+        check("a tab-collapsed export keeps the live.com cookies",
+                fromCollapsed.contains("__Host-MSAAUTH=11-M.C541_FAKE")
+                        && fromCollapsed.contains("MSPAuth=Disabled"),
+                fromCollapsed);
+        var collapsedLabelled = Auth.parseTokenList(
+                ".login.live.com TRUE / TRUE 0 JSHP 3$someone%40example.com$f$l$x$0\n"
+                        + ".login.live.com FALSE / TRUE 0 __Host-MSAAUTHP 11-M.C541_FAKE\n");
+        check("a tab-collapsed export still labels the account",
+                collapsedLabelled.size() == 1
+                        && "someone@example.com".equals(collapsedLabelled.get(0).label()),
+                collapsedLabelled.isEmpty() ? "nothing parsed" : "" + collapsedLabelled.get(0).label());
+
+        // Pasting the export into the token screen must not shred it: the tabs are the format.
+        var fromTokenScreen = Auth.parseTokenList(export);
+        check("an exported cookies.txt is one account, not one per line",
+                fromTokenScreen.size() == 1, "" + fromTokenScreen.size());
+        check("the export reaches the cookie path with its tabs intact",
+                !fromTokenScreen.isEmpty() && fromTokenScreen.get(0).token().equals(export), "");
+
+        String exportWithAddress = ".login.live.com\tTRUE\t/\tTRUE\t0\tJSHP\t3$someone%40example.com$first$last$x$0\n"
+                + ".login.live.com\tFALSE\t/\tTRUE\t0\t__Host-MSAAUTHP\t11-M.C541_FAKE\n";
+        var labelled = Auth.parseTokenList(exportWithAddress);
+        check("the export's address labels the account",
+                labelled.size() == 1 && "someone@example.com".equals(labelled.get(0).label()),
+                labelled.isEmpty() ? "nothing parsed" : "" + labelled.get(0).label());
+
         boolean rejected = false;
         try {
             Auth.cookieHeader("hello=world");
@@ -183,6 +231,26 @@ public final class SelfTest {
         check("hypixel host recognized", Bans.isHypixel("mc.hypixel.net"), "");
         check("hypixel host with a port recognized", Bans.isHypixel("hypixel.net:25565"), "");
         check("other host is not hypixel", !Bans.isHypixel("play.example.net"), "");
+
+        check("permanent ban recognized",
+                Bans.looksBanned("You are permanently banned from this server!\nReason: Cheating"), "");
+        check("temporary ban with colours recognized",
+                Bans.looksBanned("\u00a7cYou are temporarily banned for 29d 23h 59m from this server!"), "");
+        check("security ban recognized",
+                Bans.looksBanned("You are connecting from a network we have blocked from joining this server."), "");
+        check("short ban wording recognized",
+                Bans.looksBanned("Your account has been banned. Appeal at hypixel.net/appeals"), "");
+        check("banned without any other wording recognized",
+                Bans.looksBanned("You were banned."), "");
+        check("a normal kick is not a ban",
+                !Bans.looksBanned("You were kicked from this server: lobby closed"), "");
+        check("a staff kick is not a ban", !Bans.looksBanned("You were kicked: be nice"), "");
+        check("the ban reason is read",
+                Bans.reasonLine("You are permanently banned from this server!\nReason: Cheating through unfair advantages.")
+                        .startsWith("Cheating"),
+                Bans.reasonLine("You are permanently banned from this server!\nReason: Cheating through unfair advantages."));
+        check("no reason line means no reason",
+                Bans.reasonLine("You are permanently banned from this server!").isEmpty(), "");
         check("lookalike host is not hypixel", !Bans.isHypixel("not-hypixel.net"), "");
         check("permanent ban recognized", Bans.looksBanned(
                 "You are permanently banned from this server! Reason: Cheating\n"

@@ -59,7 +59,7 @@ longer; later builds reuse the cache.
 | --- | --- |
 | Add account | Microsoft device-code sign-in; the refresh token is stored so the account renews itself |
 | Cookie | Signs in from a login.live.com browser cookie: paste it, press Enter |
-| Paste token | One token or cookie, or a whole `label:token` clipboard set — one account per line, and a bad line never stops the rest |
+| Paste token | One token or cookie, or a whole `label:token` clipboard set — one account per line, and a bad line never stops the rest. A pasted `cookies.txt` export is read as one account, keeping its tab-separated columns |
 | SSID | Refreshes the selected account and copies its Minecraft access token |
 | Activate | Switches the running game to the selected account, so the next server join uses it |
 | Skin | Uploads a skin to the selected account, with a reusable local library |

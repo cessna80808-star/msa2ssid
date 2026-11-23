@@ -9,6 +9,7 @@ import java.util.ArrayList;
 import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.function.Consumer;
 
@@ -178,18 +179,63 @@ public final class Auth {
     private static final String COOKIE_REDIRECT_URI = "https://login.live.com/oauth20_desktop.srf";
     private static final String COOKIE_SCOPE = "service::user.auth.xboxlive.com::MBI_SSL";
 
+    /** The authorize endpoint answers a browser, not a library. */
+    private static final String BROWSER_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+            + " AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36";
+
     /** Cookies that only exist on a signed-in login.live.com session. */
     private static final String[] SESSION_COOKIES = {
-            "MSPAuth=", "__Host-MSAAUTHP=", "__Host-MSAAUTH=", "MSPProf="
+            "MSPAuth", "__Host-MSAAUTHP", "__Host-MSAAUTH", "MSPProf"
     };
 
     /** True when pasted text is a browser cookie rather than a token. */
     public static boolean looksLikeCookie(String raw) {
         if (raw == null) return false;
         for (String name : SESSION_COOKIES) {
-            if (raw.contains(name)) return true;
+            if (raw.contains(name + "=")) return true;
+        }
+        // A cookies.txt export separates the name and the value with a tab, so the
+        // "name=" form above never matches one: read its columns instead.
+        for (String line : raw.split("\\R")) {
+            String[] row = netscapeRow(line);
+            if (row != null && isSessionCookie(row[1])) return true;
         }
         return false;
+    }
+
+    /**
+     * One cookies.txt row as {domain, name, value}, whether or not its tabs survived the
+     * paste: the mod's input box is a single line, and a collapse to plain spaces still
+     * leaves the seven fields a cookies.txt row has.
+     *
+     * @return the three fields, or null when the line is not a cookies.txt row
+     */
+    private static String[] netscapeRow(String line) {
+        String[] columns = line.split("\t", -1);
+        if (columns.length >= 7) {
+            return new String[]{columns[0], columns[5].strip(), columns[6].strip()};
+        }
+        String[] parts = line.strip().split(" {1,}", 7);
+        if (parts.length < 7) return null;
+        boolean flags = (parts[1].equalsIgnoreCase("TRUE") || parts[1].equalsIgnoreCase("FALSE"))
+                && (parts[3].equalsIgnoreCase("TRUE") || parts[3].equalsIgnoreCase("FALSE"))
+                && parts[2].equals("/")
+                && !parts[4].isEmpty() && parts[4].chars().allMatch(Character::isDigit);
+        return flags ? new String[]{parts[0], parts[5], parts[6]} : null;
+    }
+
+    /** One of the cookie names only a signed-in login.live.com session has. */
+    private static boolean isSessionCookie(String name) {
+        for (String cookie : SESSION_COOKIES) {
+            if (cookie.equalsIgnoreCase(name)) return true;
+        }
+        return false;
+    }
+
+    /** Domains whose cookies a login.live.com authorize request can use. */
+    private static boolean isLiveDomain(String domain) {
+        String d = domain.toLowerCase(Locale.ROOT);
+        return d.equals("live.com") || d.endsWith(".live.com") || d.equals("login.live.com");
     }
 
     /**
@@ -200,30 +246,47 @@ public final class Auth {
      */
     public static String cookieHeader(String raw) {
         if (raw == null || raw.isBlank()) throw new IllegalArgumentException("paste the cookie first");
-        List<String> pairs = new ArrayList<>();
+        List<String> session = new ArrayList<>();
+        List<String> other = new ArrayList<>();
         for (String rawLine : raw.split("\\R")) {
-            String line = rawLine.trim();
-            if (line.startsWith("#HttpOnly_")) {
-                line = line.substring("#HttpOnly_".length()).trim();
-            } else if (line.isEmpty() || line.startsWith("#")) {
-                continue;
-            }
-            if (line.regionMatches(true, 0, "cookie:", 0, 7)) line = line.substring(7).trim();
+            if (rawLine.isBlank()) continue;
 
-            if (line.indexOf('\t') >= 0) {
+            // Split before trimming, so an empty value stays an empty column instead of
+            // shifting the name into the value slot.
+            String[] row = netscapeRow(rawLine);
+            if (row != null) {
                 // cookies.txt: domain, flag, path, secure, expiry, name, value
-                String[] columns = line.split("\t");
-                if (columns.length < 2) continue;
-                pairs.add(columns[columns.length - 2].trim() + "=" + columns[columns.length - 1].trim());
+                String domain = row[0].strip();
+                if (domain.startsWith("#HttpOnly_")) {
+                    domain = domain.substring("#HttpOnly_".length());
+                } else if (domain.startsWith("#")) {
+                    continue;
+                }
+                String name = row[1];
+                String value = row[2];
+                // An export carries every cookie the browser had, including other hosts
+                // and placeholder rows; only the live.com ones belong in this request.
+                if (name.isEmpty() || value.isEmpty() || !isLiveDomain(domain)) continue;
+                (isSessionCookie(name) ? session : other).add(name + "=" + value);
                 continue;
             }
+
+            String line = rawLine.strip();
+            if (line.isEmpty() || line.startsWith("#")) continue;
+            if (line.regionMatches(true, 0, "cookie:", 0, 7)) line = line.substring(7).strip();
             for (String pair : line.split(";")) {
-                String p = pair.trim();
+                String p = pair.strip();
                 int eq = p.indexOf('=');
-                if (eq > 0) pairs.add(p.substring(0, eq).trim() + "=" + p.substring(eq + 1).trim());
+                if (eq <= 0) continue;
+                String name = p.substring(0, eq).strip();
+                String value = p.substring(eq + 1).strip();
+                if (value.isEmpty()) continue;
+                (isSessionCookie(name) ? session : other).add(name + "=" + value);
             }
         }
-        String header = String.join("; ", pairs);
+        // The auth cookies go first so they survive a server that trims long headers.
+        session.addAll(other);
+        String header = String.join("; ", session);
         if (!looksLikeCookie(header)) {
             throw new IllegalArgumentException("that does not look like a sign-in cookie"
                     + " (expected MSPAuth=... or __Host-MSAAUTHP=...)");
@@ -249,22 +312,33 @@ public final class Auth {
                 + "&code_challenge=" + enc(challenge(verifier))
                 + "&code_challenge_method=S256";
 
-        Http.Redirect redirect = Http.getRedirect(url,
-                Map.of("Cookie", header, "Accept", "text/html,application/xhtml+xml"));
-        if (redirect.status() != 302) throw new Exception(cookieFailure(redirect.status()));
+        // login.live.com only hands back a code to something that looks like a browser:
+        // its own client id is fine, but the header has to carry a browser user agent.
+        Http.Redirect redirect = Http.getRedirect(url, Map.of(
+                "Cookie", header,
+                "Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "Accept-Language", "en-US,en;q=0.9",
+                "User-Agent", BROWSER_USER_AGENT));
+        // Any redirect can carry the code; only a page means the session was refused.
+        int status = redirect.status();
+        if (status < 300 || status >= 400) throw new Exception(cookieFailure(status));
 
-        String code = queryParam(redirect.location(), "code");
+        String location = redirect.location();
+        String code = queryParam(location, "code");
         if (code == null) {
-            String error = queryParam(redirect.location(), "error");
-            throw new Exception(error == null
-                    ? "the cookie did not return a sign-in code — it has expired, so copy a fresh one"
-                    : "Microsoft refused the sign-in: " + error);
+            String error = queryParam(location, "error");
+            if (error != null) throw new Exception("Microsoft refused the sign-in: " + error);
+            throw new Exception("the cookie did not return a sign-in code (sent to "
+                    + (location == null ? "nowhere" : location) + ") — it has expired, copy a fresh one");
         }
 
+        // The scope has to be repeated here: without it login.live.com answers
+        // 500 server_error for a service-scoped code, PKCE or not.
         String form = "client_id=" + enc(DEFAULT_CLIENT_ID)
                 + "&code=" + enc(code)
                 + "&grant_type=authorization_code"
                 + "&redirect_uri=" + enc(COOKIE_REDIRECT_URI)
+                + "&scope=" + enc(COOKIE_SCOPE)
                 + "&code_verifier=" + enc(verifier);
         MsTokens tokens = parseTokens(Http.send("POST", LIVE_TOKEN_URL, form,
                 "application/x-www-form-urlencoded", Map.of("Accept", "application/json")));
@@ -347,10 +421,18 @@ public final class Auth {
     /**
      * Splits pasted text into token lines: "label:token" or a bare token, one per line.
      * Blank lines and "#" comments are dropped, so an exported account set works as-is.
+     *
+     * A cookies.txt export is kept whole: its tab-separated columns are one sign-in, and
+     * cleaning it line by line would collapse the tabs and turn it into seven typos. It is
+     * checked before any cleaning, so the raw block reaches cookieHeader() intact.
      */
     public static List<TokenLine> parseTokenList(String text) {
         List<TokenLine> out = new ArrayList<>();
         if (text == null) return out;
+        if (looksLikeCookie(text)) {
+            out.add(new TokenLine(cookieLabel(text), text));
+            return out;
+        }
         for (String rawLine : text.split("\\R")) {
             String line = cleanToken(rawLine);
             if (line.isEmpty() || line.startsWith("#")) continue;
@@ -362,6 +444,28 @@ public final class Auth {
             out.add(new TokenLine(labelled ? line.substring(0, colon) : null, token));
         }
         return out;
+    }
+
+    /**
+     * A name for a pasted cookie block, so the account is not "unknown" for the seconds
+     * before its profile arrives: the JSHP cookie carries the address in its columns.
+     */
+    private static String cookieLabel(String rawCookies) {
+        for (String line : rawCookies.split("\\R")) {
+            String[] row = netscapeRow(line);
+            if (row == null || !"JSHP".equalsIgnoreCase(row[1])) continue;
+            // JSHP is "3$address$first$last$...": take the one field that looks like a mailbox.
+            for (String field : row[2].split("\\$")) {
+                String address;
+                try {
+                    address = URLDecoder.decode(field, StandardCharsets.UTF_8);
+                } catch (IllegalArgumentException ignored) {
+                    address = field;
+                }
+                if (address.indexOf('@') > 0) return address;
+            }
+        }
+        return null;
     }
 
     /** True for Microsoft OAuth refresh tokens and Xbox compact tickets ("M.C..."). */
