@@ -28,6 +28,7 @@ public final class SelfTest {
         tokenParsing();
         deadTokenIsRejected();
         tokenListParsing();
+        cookieParsing();
         banAndRateLimit();
         sessionToAccount();
         deviceCodeReachable();
@@ -149,6 +150,35 @@ public final class SelfTest {
     }
 
     /** Hypixel ban detection and the import rate-limit policy. */
+    private static void cookieParsing() {
+        check("cookie pairs pass through",
+                Auth.cookieHeader("MSPAuth=abc123; MSPProf=def456")
+                        .equals("MSPAuth=abc123; MSPProf=def456"),
+                Auth.cookieHeader("MSPAuth=abc123; MSPProf=def456"));
+
+        check("Cookie: prefix is stripped",
+                Auth.cookieHeader("Cookie: __Host-MSAAUTHP=1.AAAA; __Host-MSAAUTH=2.BBBB")
+                        .equals("__Host-MSAAUTHP=1.AAAA; __Host-MSAAUTH=2.BBBB"),
+                Auth.cookieHeader("Cookie: __Host-MSAAUTHP=1.AAAA; __Host-MSAAUTH=2.BBBB"));
+
+        String netscape = Auth.cookieHeader("# Netscape HTTP Cookie File\n"
+                + "#HttpOnly_.live.com\tTRUE\t/\tTRUE\t0\tMSPAuth\tabc123\n"
+                + ".live.com\tTRUE\t/\tTRUE\t0\tMSPProf\tdef456\n");
+        check("netscape export becomes a header",
+                netscape.equals("MSPAuth=abc123; MSPProf=def456"), netscape);
+
+        check("a token is not a cookie", !Auth.looksLikeCookie("M.C5AAAA.T.BBBB"), "");
+        check("a cookie is detected", Auth.looksLikeCookie("__Host-MSAAUTHP=1.AAAA"), "");
+
+        boolean rejected = false;
+        try {
+            Auth.cookieHeader("hello=world");
+        } catch (IllegalArgumentException expected) {
+            rejected = true;
+        }
+        check("a cookie without a session is rejected", rejected, "accepted hello=world");
+    }
+
     private static void banAndRateLimit() {
         check("hypixel host recognized", Bans.isHypixel("mc.hypixel.net"), "");
         check("hypixel host with a port recognized", Bans.isHypixel("hypixel.net:25565"), "");

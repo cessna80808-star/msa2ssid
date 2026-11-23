@@ -20,7 +20,7 @@ import net.minecraft.network.chat.Component;
  * One token or a whole "label:token" list both go through {@link #submit}, which adds
  * them one at a time and reports how many worked. Accepted shapes: a Microsoft
  * refresh token (M.C5..., 0.A...), an existing Minecraft access token (eyJ..., an
- * SSID), or an Xbox/Microsoft access ticket (M....).
+ * SSID), an Xbox/Microsoft access ticket (M....), or a login.live.com cookie.
  */
 public final class AddTokenScreen extends Screen {
 
@@ -82,7 +82,7 @@ public final class AddTokenScreen extends Screen {
         tokenBox = new EditBox(this.font, px + PAD, tokenY(), pw - 2 * PAD, 20,
                 Component.literal("token"));
         tokenBox.setMaxLength(8192);
-        tokenBox.setHint(Component.literal("M.C5...   eyJ...   M.C..."));
+        tokenBox.setHint(Component.literal("M.C5...   eyJ...   MSPAuth=..."));
         addRenderableWidget(tokenBox);
 
         int[] save = saveBounds();
@@ -206,7 +206,7 @@ public final class AddTokenScreen extends Screen {
 
         super.extractRenderState(g, mouseX, mouseY, partialTick);
 
-        g.text(this.font, "M.C5... refresh   eyJ... SSID   M.... ticket",
+        g.text(this.font, "M.C5... refresh   eyJ... SSID   MSPAuth=... cookie",
                 px + PAD, py + 40, Ui.MUTED);
         g.text(this.font, "Import list reads the clipboard: label:token per line",
                 px + PAD, py + 50, Ui.MUTED);

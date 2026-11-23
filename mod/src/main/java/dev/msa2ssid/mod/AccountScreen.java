@@ -16,8 +16,8 @@ import net.minecraft.resources.Identifier;
 
 /**
  * The account list, drawn as its own panel rather than vanilla widget stacks:
- * a header strip with client-id state, account cards with skin heads and session
- * state, and two rows of pill actions at the bottom.
+ * a header strip with the account count, cards with skin heads and session state,
+ * then one row of pills for the selected account and one for adding accounts.
  *
  * Rows and actions are invisible vanilla buttons purely for hit-testing; every
  * pixel is drawn here.
@@ -32,10 +32,14 @@ public final class AccountScreen extends Screen {
     private static final int FOOTER_H = 74;
     private static final int PAD = 8;
     private static final int BTN_H = 22;
+    private static final int GAP = 6;
+    private static final int ACTION_TOP = 20;
 
-    private static final String[] ROW_A = {"Add account", "Paste token", "SSID", "Activate"};
-    private static final String[] ROW_B = {"Skin", "Rename", "Remove", "Done"};
-    private static final int ACTIVATE = 3;
+    /** Pills that act on the selected account, directly under the list. */
+    private static final String[] ACCOUNT_ACTIONS = {"Activate", "SSID", "Skin", "Rename", "Remove"};
+    /** Pills that bring an account in, plus the way out. */
+    private static final String[] ADD_ACTIONS = {"Add account", "Cookie", "Paste token", "Done"};
+    private static final int ACTIVATE = 0;
 
     private final List<Button> rows = new ArrayList<>();
     private String focusUuid;
@@ -83,14 +87,14 @@ public final class AccountScreen extends Screen {
         return py + ph - FOOTER_H;
     }
 
-    private int[] rowABounds(int i) {
-        int w = (pw - 2 * PAD - 3 * 7) / 4;
-        return new int[]{px + PAD + i * (w + 7), footerY() + 16, w, BTN_H};
+    private int[] accountActionBounds(int i) {
+        int w = (pw - 2 * PAD - (ACCOUNT_ACTIONS.length - 1) * GAP) / ACCOUNT_ACTIONS.length;
+        return new int[]{px + PAD + i * (w + GAP), footerY() + ACTION_TOP, w, BTN_H};
     }
 
-    private int[] rowBBounds(int i) {
-        int w = (pw - 2 * PAD - 3 * 6) / 4;
-        return new int[]{px + PAD + i * (w + 6), footerY() + 16 + BTN_H + 6, w, BTN_H};
+    private int[] addActionBounds(int i) {
+        int w = (pw - 2 * PAD - (ADD_ACTIONS.length - 1) * GAP) / ADD_ACTIONS.length;
+        return new int[]{px + PAD + i * (w + GAP), footerY() + ACTION_TOP + BTN_H + GAP, w, BTN_H};
     }
 
     @Override
@@ -113,16 +117,16 @@ public final class AccountScreen extends Screen {
                     .build()));
         }
 
-        for (int i = 0; i < ROW_A.length; i++) {
+        for (int i = 0; i < ACCOUNT_ACTIONS.length; i++) {
             final int index = i;
-            int[] b = rowABounds(i);
-            addRenderableWidget(Button.builder(Component.literal(""), x -> actionA(index))
+            int[] b = accountActionBounds(i);
+            addRenderableWidget(Button.builder(Component.literal(""), x -> accountAction(index))
                     .bounds(b[0], b[1], b[2], b[3]).build());
         }
-        for (int i = 0; i < ROW_B.length; i++) {
+        for (int i = 0; i < ADD_ACTIONS.length; i++) {
             final int index = i;
-            int[] b = rowBBounds(i);
-            addRenderableWidget(Button.builder(Component.literal(""), x -> actionB(index))
+            int[] b = addActionBounds(i);
+            addRenderableWidget(Button.builder(Component.literal(""), x -> addAction(index))
                     .bounds(b[0], b[1], b[2], b[3]).build());
         }
 
@@ -144,20 +148,21 @@ public final class AccountScreen extends Screen {
         this.rebuildWidgets();
     }
 
-    private void actionA(int i) {
+    private void accountAction(int i) {
         switch (i) {
-            case 0 -> openSignIn();
-            case 1 -> openToken();
-            case 2 -> convert();
-            default -> activate();
+            case 0 -> activate();
+            case 1 -> convert();
+            case 2 -> openSkin();
+            case 3 -> openRename();
+            default -> removeSelected();
         }
     }
 
-    private void actionB(int i) {
+    private void addAction(int i) {
         switch (i) {
-            case 0 -> openSkin();
-            case 1 -> openRename();
-            case 2 -> removeSelected();
+            case 0 -> openSignIn();
+            case 1 -> openCookie();
+            case 2 -> openToken();
             default -> onClose();
         }
     }
@@ -167,18 +172,18 @@ public final class AccountScreen extends Screen {
         // Panel and header first, so the invisible hit-testing widgets sit on top.
         Ui.panel(g, px, py, pw, ph);
         boolean hasClientId = store().clientId() != null;
-        Ui.header(g, this.font, px, py, pw, HEADER_H, "ACCOUNT MANAGER",
-                hasClientId ? "CLIENT ID SET" : "NO CLIENT ID",
-                hasClientId ? Ui.MUTED : Ui.DANGER);
+        int count = store().accounts().size();
+        String counter = count == 0 ? "NO ACCOUNTS" : count + (count == 1 ? " ACCOUNT" : " ACCOUNTS");
+        Ui.header(g, this.font, px, py, pw, HEADER_H, "ACCOUNT MANAGER", counter, Ui.MUTED);
 
         super.extractRenderState(g, mouseX, mouseY, partialTick);
 
         List<Account> accounts = store().accounts();
         if (accounts.isEmpty()) {
             g.centeredText(this.font, "No accounts yet", px + pw / 2, rowsTop + 34, Ui.TEXT);
-            g.centeredText(this.font, "Add account signs one in, Paste token takes one you have",
+            g.centeredText(this.font, "Add account uses a code, Cookie a browser session",
                     px + pw / 2, rowsTop + 48, Ui.MUTED);
-            g.centeredText(this.font, "Activate switches the running game to the selected account",
+            g.centeredText(this.font, "Paste token takes one you already have",
                     px + pw / 2, rowsTop + 62, Ui.MUTED);
         }
 
@@ -200,7 +205,11 @@ public final class AccountScreen extends Screen {
             String name = account.name() == null ? "(unnamed)" : account.name();
             g.text(this.font, name, x + 36, y + 7, Ui.TEXT);
             String meta = shortId(account.uuid()) + "   "
-                    + (account.msRefreshToken() != null ? "refresh token" : "session only");
+                    + (account.msRefreshToken() != null ? "auto-renew" : "session only");
+            if (account.hasLiveSession()) {
+                long left = Math.max(60, account.sessionSecondsLeft());
+                meta += "   " + (left >= 3600 ? left / 3600 + "h left" : left / 60 + "m left");
+            }
             g.text(this.font, meta, x + 36, y + 19, Ui.MUTED);
 
             boolean active = SessionInject.isActive(account.uuid());
@@ -210,16 +219,20 @@ public final class AccountScreen extends Screen {
                     active || live ? Ui.OK : Ui.DANGER);
         }
 
-        for (int i = 0; i < ROW_A.length; i++) {
-            int[] b = rowABounds(i);
-            Ui.pill(g, this.font, b[0], b[1], b[2], b[3], ROW_A[i],
-                    Ui.inside(mouseX, mouseY, b[0], b[1], b[2], b[3]), i == ACTIVATE);
+        boolean canAct = selectedAccount() != null;
+        for (int i = 0; i < ACCOUNT_ACTIONS.length; i++) {
+            int[] b = accountActionBounds(i);
+            boolean hovered = canAct && Ui.inside(mouseX, mouseY, b[0], b[1], b[2], b[3]);
+            Ui.pill(g, this.font, b[0], b[1], b[2], b[3], ACCOUNT_ACTIONS[i],
+                    hovered, canAct && i == ACTIVATE, canAct);
         }
-        for (int i = 0; i < ROW_B.length; i++) {
-            int[] b = rowBBounds(i);
-            Ui.pill(g, this.font, b[0], b[1], b[2], b[3], ROW_B[i],
-                    Ui.inside(mouseX, mouseY, b[0], b[1], b[2], b[3]), false);
+        for (int i = 0; i < ADD_ACTIONS.length; i++) {
+            int[] b = addActionBounds(i);
+            Ui.pill(g, this.font, b[0], b[1], b[2], b[3], ADD_ACTIONS[i],
+                    Ui.inside(mouseX, mouseY, b[0], b[1], b[2], b[3]), i == 0, true);
         }
+
+        g.fill(px, footerY(), px + pw, footerY() + 1, Ui.PANEL_BORDER);
 
         String note = status.isEmpty() && !hasClientId
                 ? "Set a client id in Paste token to use refresh tokens"
@@ -228,7 +241,7 @@ public final class AccountScreen extends Screen {
             int color = note.startsWith("Failed") ? Ui.DANGER
                     : note.startsWith("Removed") ? Ui.WARN
                     : (!hasClientId && status.isEmpty() ? Ui.DANGER : Ui.MUTED);
-            g.text(this.font, note, px + PAD, footerY() + 3, color);
+            g.text(this.font, note, px + PAD, footerY() + 6, color);
         }
     }
 
@@ -246,6 +259,10 @@ public final class AccountScreen extends Screen {
             return;
         }
         this.minecraft.setScreenAndShow(new DeviceCodeScreen(clientId));
+    }
+
+    private void openCookie() {
+        this.minecraft.setScreenAndShow(new CookieScreen());
     }
 
     private void openToken() {

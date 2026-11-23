@@ -1,8 +1,12 @@
 package dev.msa2ssid.core;
 
+import java.net.URLDecoder;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.SecureRandom;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -10,9 +14,9 @@ import java.util.function.Consumer;
 
 /**
  * Microsoft device-code sign-in, the Xbox Live / XSTS / Minecraft services chain,
- * and sign-in from a token the account's owner already holds: a Microsoft refresh
- * token, an Xbox/Microsoft access ticket, or an existing Minecraft access token
- * (the "SSID").
+ * and sign-in from what the account's owner already holds: a Microsoft refresh
+ * token, an Xbox/Microsoft access ticket, an existing Minecraft access token (the
+ * "SSID"), or a signed-in login.live.com browser cookie.
  */
 public final class Auth {
 
@@ -167,6 +171,148 @@ public final class Auth {
         return parseTokens(body);
     }
 
+    // ---------------------------------------------------------- browser cookie
+
+    /** The Live-Connect endpoints the launcher's own client uses. */
+    public static final String COOKIE_AUTHORIZE_URL = "https://login.live.com/oauth20_authorize.srf";
+    private static final String COOKIE_REDIRECT_URI = "https://login.live.com/oauth20_desktop.srf";
+    private static final String COOKIE_SCOPE = "service::user.auth.xboxlive.com::MBI_SSL";
+
+    /** Cookies that only exist on a signed-in login.live.com session. */
+    private static final String[] SESSION_COOKIES = {
+            "MSPAuth=", "__Host-MSAAUTHP=", "__Host-MSAAUTH=", "MSPProf="
+    };
+
+    /** True when pasted text is a browser cookie rather than a token. */
+    public static boolean looksLikeCookie(String raw) {
+        if (raw == null) return false;
+        for (String name : SESSION_COOKIES) {
+            if (raw.contains(name)) return true;
+        }
+        return false;
+    }
+
+    /**
+     * Normalises whatever a browser hands over into a Cookie header: a
+     * "Cookie: a=b; c=d" request header, a "a=b; c=d" pair list, or a Netscape
+     * cookies.txt export (tab separated, "#HttpOnly_" prefixed). A file export is
+     * reduced to its name/value columns, since the rest would go out as garbage.
+     */
+    public static String cookieHeader(String raw) {
+        if (raw == null || raw.isBlank()) throw new IllegalArgumentException("paste the cookie first");
+        List<String> pairs = new ArrayList<>();
+        for (String rawLine : raw.split("\\R")) {
+            String line = rawLine.trim();
+            if (line.startsWith("#HttpOnly_")) {
+                line = line.substring("#HttpOnly_".length()).trim();
+            } else if (line.isEmpty() || line.startsWith("#")) {
+                continue;
+            }
+            if (line.regionMatches(true, 0, "cookie:", 0, 7)) line = line.substring(7).trim();
+
+            if (line.indexOf('\t') >= 0) {
+                // cookies.txt: domain, flag, path, secure, expiry, name, value
+                String[] columns = line.split("\t");
+                if (columns.length < 2) continue;
+                pairs.add(columns[columns.length - 2].trim() + "=" + columns[columns.length - 1].trim());
+                continue;
+            }
+            for (String pair : line.split(";")) {
+                String p = pair.trim();
+                int eq = p.indexOf('=');
+                if (eq > 0) pairs.add(p.substring(0, eq).trim() + "=" + p.substring(eq + 1).trim());
+            }
+        }
+        String header = String.join("; ", pairs);
+        if (!looksLikeCookie(header)) {
+            throw new IllegalArgumentException("that does not look like a sign-in cookie"
+                    + " (expected MSPAuth=... or __Host-MSAAUTHP=...)");
+        }
+        return header;
+    }
+
+    /**
+     * Signs in with a login.live.com browser cookie the way the launcher does: the
+     * cookie answers the OAuth authorize request without a password, and the code
+     * it redirects back with is exchanged for a token pair. The refresh token is
+     * kept, so the account renews itself like a device-code sign-in. Makes network
+     * calls, so call it off the render thread.
+     */
+    public static TokenLogin loginWithCookie(String rawCookie) throws Exception {
+        String header = cookieHeader(rawCookie);
+        String verifier = pkceVerifier();
+        String url = COOKIE_AUTHORIZE_URL
+                + "?client_id=" + enc(DEFAULT_CLIENT_ID)
+                + "&redirect_uri=" + enc(COOKIE_REDIRECT_URI)
+                + "&response_type=code"
+                + "&scope=" + enc(COOKIE_SCOPE)
+                + "&code_challenge=" + enc(challenge(verifier))
+                + "&code_challenge_method=S256";
+
+        Http.Redirect redirect = Http.getRedirect(url,
+                Map.of("Cookie", header, "Accept", "text/html,application/xhtml+xml"));
+        if (redirect.status() != 302) throw new Exception(cookieFailure(redirect.status()));
+
+        String code = queryParam(redirect.location(), "code");
+        if (code == null) {
+            String error = queryParam(redirect.location(), "error");
+            throw new Exception(error == null
+                    ? "the cookie did not return a sign-in code — it has expired, so copy a fresh one"
+                    : "Microsoft refused the sign-in: " + error);
+        }
+
+        String form = "client_id=" + enc(DEFAULT_CLIENT_ID)
+                + "&code=" + enc(code)
+                + "&grant_type=authorization_code"
+                + "&redirect_uri=" + enc(COOKIE_REDIRECT_URI)
+                + "&code_verifier=" + enc(verifier);
+        MsTokens tokens = parseTokens(Http.send("POST", LIVE_TOKEN_URL, form,
+                "application/x-www-form-urlencoded", Map.of("Accept", "application/json")));
+        Session session = chain(tokens.accessToken(), "t");
+        return new TokenLogin(session, tokens.refreshToken(), "Microsoft account cookie");
+    }
+
+    /** Turns a failed authorize step into something actionable. */
+    private static String cookieFailure(int status) {
+        if (status == 200) {
+            return "the cookie is not signed in any more — sign in at login.live.com again"
+                    + " (an account that needs a passkey cannot use a cookie)";
+        }
+        return "sign-in with the cookie failed (HTTP " + status + ")";
+    }
+
+    private static String pkceVerifier() {
+        byte[] bytes = new byte[48];
+        new SecureRandom().nextBytes(bytes);
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
+    }
+
+    private static String challenge(String verifier) throws Exception {
+        byte[] digest = MessageDigest.getInstance("SHA-256")
+                .digest(verifier.getBytes(StandardCharsets.US_ASCII));
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(digest);
+    }
+
+    /** One parameter out of a redirect URL's query string. */
+    private static String queryParam(String url, String name) {
+        if (url == null) return null;
+        int question = url.indexOf('?');
+        if (question < 0) return null;
+        String query = url.substring(question + 1);
+        int hash = query.indexOf('#');
+        if (hash >= 0) query = query.substring(0, hash);
+        for (String part : query.split("&")) {
+            int eq = part.indexOf('=');
+            if (eq <= 0 || !part.substring(0, eq).equals(name)) continue;
+            try {
+                return URLDecoder.decode(part.substring(eq + 1), StandardCharsets.UTF_8);
+            } catch (IllegalArgumentException e) {
+                return part.substring(eq + 1);
+            }
+        }
+        return null;
+    }
+
     // ----------------------------------------------------------- pasted tokens
 
     /** How a pasted token was understood, plus the session it produced. */
@@ -237,6 +383,7 @@ public final class Auth {
      * session. Makes network calls, so call it off the render thread.
      */
     public static TokenLogin loginWithToken(String clientId, String rawToken) throws Exception {
+        if (looksLikeCookie(rawToken)) return loginWithCookie(rawToken);
         String token = cleanToken(rawToken);
         if (token.isEmpty()) throw new IllegalArgumentException("paste a token first");
         if (token.length() < MIN_TOKEN_LENGTH) {

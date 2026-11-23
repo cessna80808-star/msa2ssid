@@ -18,6 +18,12 @@ public final class Http {
             .followRedirects(HttpClient.Redirect.NORMAL)
             .build();
 
+    /** Same client, but a redirect is a result rather than something to follow. */
+    private static final HttpClient NO_REDIRECT = HttpClient.newBuilder()
+            .connectTimeout(Duration.ofSeconds(20))
+            .followRedirects(HttpClient.Redirect.NEVER)
+            .build();
+
     private static final Duration TIMEOUT = Duration.ofSeconds(60);
     private static final String UA = "msa2ssid-accounts/1.0";
 
@@ -129,6 +135,31 @@ public final class Http {
             return new Multipart(out.toByteArray(), "multipart/form-data; boundary=" + boundary);
         } catch (IOException e) {
             throw new UncheckedIOException(e);
+        }
+    }
+
+    /** A request that stops at the first response, kept for sign-in redirect hops. */
+    public record Redirect(int status, String location) {
+    }
+
+    /**
+     * Sends a GET and reports where the server pointed instead of following it, so a
+     * caller can read an authorization code out of the Location header.
+     */
+    public static Redirect getRedirect(String url, Map<String, String> headers) {
+        try {
+            HttpRequest.Builder b = HttpRequest.newBuilder(URI.create(url))
+                    .timeout(TIMEOUT)
+                    .header("User-Agent", UA);
+            if (headers != null) headers.forEach(b::header);
+            HttpResponse<String> r = NO_REDIRECT.send(b.GET().build(),
+                    HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            return new Redirect(r.statusCode(), r.headers().firstValue("Location").orElse(""));
+        } catch (IOException e) {
+            throw new UncheckedIOException("cannot reach " + url + ": " + e.getMessage(), e);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException("interrupted while calling " + url, e);
         }
     }
 

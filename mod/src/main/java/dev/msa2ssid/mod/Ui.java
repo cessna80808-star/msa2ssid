@@ -24,6 +24,7 @@ final class Ui {
     static final int ROW_HOVER = 0xFF26262F;
     static final int ROW_SELECTED = 0xFF22314F;
     static final int PLACEHOLDER = 0xFF2A2A32;
+    static final int DISABLED = 0xFF55555F;
 
     private Ui() {
     }
@@ -52,15 +53,26 @@ final class Ui {
     /** A flat button: accent filled for the primary action, subtle otherwise. */
     static void pill(GuiGraphicsExtractor g, Font font, int x, int y, int w, int h,
                      String label, boolean hovered, boolean primary) {
+        pill(g, font, x, y, w, h, label, hovered, primary, true);
+    }
+
+    /** The same button, greyed out when its action has nothing to act on. */
+    static void pill(GuiGraphicsExtractor g, Font font, int x, int y, int w, int h,
+                     String label, boolean hovered, boolean primary, boolean enabled) {
         int bg;
-        if (primary) {
+        int color;
+        if (!enabled) {
+            bg = 0xFF1A1A20;
+            color = DISABLED;
+        } else if (primary) {
             bg = hovered ? 0xFF6BA1FF : ACCENT;
+            color = 0xFF0B0B10;
         } else {
             bg = hovered ? 0xFF33333D : 0xFF23232B;
+            color = TEXT;
         }
         g.fill(x, y, x + w, y + h, bg);
-        g.outline(x, y, w, h, hovered ? 0xFF7C7C8C : 0xFF3A3A46);
-        int color = primary ? 0xFF0B0B10 : TEXT;
+        g.outline(x, y, w, h, enabled && hovered ? 0xFF7C7C8C : 0xFF3A3A46);
         g.text(font, label, x + (w - font.width(label)) / 2, y + (h - 8) / 2, color);
     }
 
