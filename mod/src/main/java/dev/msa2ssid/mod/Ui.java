@@ -59,6 +59,13 @@ final class Ui {
     /** The same button, greyed out when its action has nothing to act on. */
     static void pill(GuiGraphicsExtractor g, Font font, int x, int y, int w, int h,
                      String label, boolean hovered, boolean primary, boolean enabled) {
+        pill(g, font, x, y, w, h, label, hovered, primary, enabled, TEXT);
+    }
+
+    /** The same button with its own label colour (a destructive action, say). */
+    static void pill(GuiGraphicsExtractor g, Font font, int x, int y, int w, int h,
+                     String label, boolean hovered, boolean primary, boolean enabled,
+                     int labelColor) {
         int bg;
         int color;
         if (!enabled) {
@@ -69,7 +76,7 @@ final class Ui {
             color = 0xFF0B0B10;
         } else {
             bg = hovered ? 0xFF33333D : 0xFF23232B;
-            color = TEXT;
+            color = labelColor;
         }
         g.fill(x, y, x + w, y + h, bg);
         g.outline(x, y, w, h, enabled && hovered ? 0xFF7C7C8C : 0xFF3A3A46);

@@ -30,7 +30,7 @@ public final class AccountScreen extends Screen {
     private static final int ROW_GAP = 3;
     private static final int MAX_ROWS = 6;
     private static final int FOOTER_H = 74;
-    private static final int PAD = 8;
+    private static final int PAD = 10;
     private static final int BTN_H = 22;
     private static final int GAP = 6;
     private static final int ACTION_TOP = 20;
@@ -180,11 +180,9 @@ public final class AccountScreen extends Screen {
 
         List<Account> accounts = store().accounts();
         if (accounts.isEmpty()) {
-            g.centeredText(this.font, "No accounts yet", px + pw / 2, rowsTop + 34, Ui.TEXT);
-            g.centeredText(this.font, "Add account uses a code, Cookie a browser session",
-                    px + pw / 2, rowsTop + 48, Ui.MUTED);
-            g.centeredText(this.font, "Paste token takes one you already have",
-                    px + pw / 2, rowsTop + 62, Ui.MUTED);
+            g.centeredText(this.font, "No accounts yet", px + pw / 2, rowsTop + 38, Ui.TEXT);
+            g.centeredText(this.font, "Add account for a sign-in code, Cookie to paste a session",
+                    px + pw / 2, rowsTop + 54, Ui.MUTED);
         }
 
         for (int i = 0; i < rows.size() && i < accounts.size(); i++) {
@@ -197,20 +195,19 @@ public final class AccountScreen extends Screen {
             Heads.request(account);
             Identifier head = Heads.get(account);
             if (head != null) {
-                Compat.blitHead(g, head, x + 8, y + 7, 20);
+                Compat.blitHead(g, head, x + 10, y + 7, 20);
             } else {
-                g.fill(x + 8, y + 7, x + 28, y + 27, Ui.PLACEHOLDER);
+                g.fill(x + 10, y + 7, x + 30, y + 27, Ui.PLACEHOLDER);
             }
 
             String name = account.name() == null ? "(unnamed)" : account.name();
-            g.text(this.font, name, x + 36, y + 7, Ui.TEXT);
-            String meta = shortId(account.uuid()) + "   "
-                    + (account.msRefreshToken() != null ? "auto-renew" : "session only");
+            g.text(this.font, name, x + 38, y + 7, Ui.TEXT);
+            String meta = account.msRefreshToken() != null ? "auto-renew" : "session only";
             if (account.hasLiveSession()) {
                 long left = Math.max(60, account.sessionSecondsLeft());
-                meta += "   " + (left >= 3600 ? left / 3600 + "h left" : left / 60 + "m left");
+                meta += "  \u00b7  " + (left >= 3600 ? left / 3600 + "h left" : left / 60 + "m left");
             }
-            g.text(this.font, meta, x + 36, y + 19, Ui.MUTED);
+            g.text(this.font, meta, x + 38, y + 19, Ui.MUTED);
 
             boolean active = SessionInject.isActive(account.uuid());
             boolean live = account.hasLiveSession();
@@ -219,12 +216,19 @@ public final class AccountScreen extends Screen {
                     active || live ? Ui.OK : Ui.DANGER);
         }
 
+        int hidden = accounts.size() - rows.size();
+        if (hidden > 0) {
+            String more = "+" + hidden + " more not shown";
+            g.text(this.font, more, px + pw - PAD - this.font.width(more), footerY() - 12, Ui.MUTED);
+        }
+
         boolean canAct = selectedAccount() != null;
         for (int i = 0; i < ACCOUNT_ACTIONS.length; i++) {
             int[] b = accountActionBounds(i);
             boolean hovered = canAct && Ui.inside(mouseX, mouseY, b[0], b[1], b[2], b[3]);
+            int tone = i == ACCOUNT_ACTIONS.length - 1 ? Ui.DANGER : Ui.TEXT;
             Ui.pill(g, this.font, b[0], b[1], b[2], b[3], ACCOUNT_ACTIONS[i],
-                    hovered, canAct && i == ACTIVATE, canAct);
+                    hovered, canAct && i == ACTIVATE, canAct, tone);
         }
         for (int i = 0; i < ADD_ACTIONS.length; i++) {
             int[] b = addActionBounds(i);
@@ -243,11 +247,6 @@ public final class AccountScreen extends Screen {
                     : (!hasClientId && status.isEmpty() ? Ui.DANGER : Ui.MUTED);
             g.text(this.font, note, px + PAD, footerY() + 6, color);
         }
-    }
-
-    private static String shortId(String uuid) {
-        if (uuid == null) return "";
-        return uuid.length() > 8 ? uuid.substring(0, 8) : uuid;
     }
 
     // ------------------------------------------------------------------ actions

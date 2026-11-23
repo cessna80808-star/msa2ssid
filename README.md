@@ -58,7 +58,7 @@ longer; later builds reuse the cache.
 | Button | What it does |
 | --- | --- |
 | Add account | Microsoft device-code sign-in; the refresh token is stored so the account renews itself |
-| Cookie | Signs in from a login.live.com browser cookie, with no code to type |
+| Cookie | Signs in from a login.live.com browser cookie: paste it, press Enter |
 | Paste token | One token or cookie, or a whole `label:token` clipboard set — one account per line, and a bad line never stops the rest |
 | SSID | Refreshes the selected account and copies its Minecraft access token |
 | Activate | Switches the running game to the selected account, so the next server join uses it |
@@ -78,7 +78,8 @@ of showing a device code:
 2. Open the browser's developer tools, find a request to `login.live.com`, and copy its
    `Cookie` request header (a `MSPAuth=...; MSPProf=...` pair list, a
    `__Host-MSAAUTHP=...` header, or a Netscape `cookies.txt` export all work).
-3. Paste it into **Cookie** and press **Sign in**.
+3. Paste it into **Cookie** and press **Enter** — that is the whole flow; there is no
+   browser to open and nothing else to confirm.
 
 The exchange is the launcher's own: the cookie answers the OAuth authorize request, and
 the code it redirects back with becomes a normal token pair. The account is then stored

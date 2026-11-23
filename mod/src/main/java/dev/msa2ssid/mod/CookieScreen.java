@@ -1,5 +1,6 @@
 package dev.msa2ssid.mod;
 
+import com.mojang.blaze3d.platform.InputConstants;
 import dev.msa2ssid.core.Account;
 import dev.msa2ssid.core.Auth;
 import dev.msa2ssid.core.Store;
@@ -9,6 +10,7 @@ import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.input.KeyEvent;
 import net.minecraft.network.chat.Component;
 
 /**
@@ -73,10 +75,22 @@ public final class CookieScreen extends Screen {
         cookieBox.setMaxLength(MAX_COOKIE_LENGTH);
         cookieBox.setHint(Component.literal("MSPAuth=...; MSPProf=..."));
         addRenderableWidget(cookieBox);
+        // Focus the field, so Ctrl+V lands in it and Enter can sign in straight away.
+        setInitialFocus(cookieBox);
 
         button(pasteBounds(), this::pasteClipboard);
         button(signInBounds(), this::signIn);
         button(backBounds(), this::onClose);
+    }
+
+    /** Enter signs in: paste the cookie, press Enter, done. */
+    @Override
+    public boolean keyPressed(KeyEvent event) {
+        if (event.key() == InputConstants.KEY_RETURN) {
+            signIn();
+            return true;
+        }
+        return super.keyPressed(event);
     }
 
     /** Invisible hit-target; the visible pill is drawn in extractRenderState. */
@@ -142,7 +156,7 @@ public final class CookieScreen extends Screen {
 
         g.text(this.font, "1. sign in at login.live.com in a browser",
                 px + PAD, py + 40, Ui.MUTED);
-        g.text(this.font, "2. copy its Cookie request header, then paste it here",
+        g.text(this.font, "2. copy its Cookie request header, paste it, press Enter",
                 px + PAD, py + 50, Ui.MUTED);
         g.text(this.font, "passkey-only accounts cannot sign in this way",
                 px + PAD, py + 98, Ui.MUTED);
